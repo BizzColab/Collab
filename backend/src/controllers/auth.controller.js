@@ -9,6 +9,8 @@ function createToken(userId) {
 }
 
 const USER_CODE_REGEX = /^[A-Z0-9]{6}$/;
+const CLOUDINARY_UPLOAD_TIMEOUT_MS = 60000;
+const CLOUDINARY_UPLOAD_MAX_RETRIES = 1;
 
 const normalizeUserCode = (value) => {
   if (value === undefined || value === null) return undefined;
@@ -33,6 +35,34 @@ const generateUserCode = async () => {
     if (await ensureUniqueUserCode(candidate)) return candidate;
   }
   throw new Error("Could not generate unique user code");
+};
+
+const isCloudinaryTimeoutError = (error) => {
+  const cloudError = error?.error || {};
+  const httpCode = Number(cloudError.http_code || error?.http_code || 0);
+  const name = String(cloudError.name || error?.name || "").toLowerCase();
+  const message = String(cloudError.message || error?.message || "").toLowerCase();
+  return httpCode === 499 || name.includes("timeout") || message.includes("timeout");
+};
+
+const uploadProfilePicWithRetry = async (rawImageData) => {
+  let lastError;
+  for (let attempt = 0; attempt <= CLOUDINARY_UPLOAD_MAX_RETRIES; attempt += 1) {
+    try {
+      return await cloudinary.uploader.upload(rawImageData, {
+        folder: "profile_pics",
+        resource_type: "image",
+        timeout: CLOUDINARY_UPLOAD_TIMEOUT_MS,
+      });
+    } catch (error) {
+      lastError = error;
+      if (!isCloudinaryTimeoutError(error) || attempt === CLOUDINARY_UPLOAD_MAX_RETRIES) {
+        break;
+      }
+      console.warn(`Cloudinary upload timed out. Retrying (${attempt + 1}/${CLOUDINARY_UPLOAD_MAX_RETRIES})...`);
+    }
+  }
+  throw lastError;
 };
 
 export async function signup(req, res) {
@@ -179,9 +209,7 @@ export async function onboard(req, res) {
     // Upload to Cloudinary if it's a new base64 image
     if (req.body.profilePic?.startsWith("data:")) {
       try {
-        const uploadResponse = await cloudinary.uploader.upload(req.body.profilePic, {
-          folder: "profile_pics",
-        });
+        const uploadResponse = await uploadProfilePicWithRetry(req.body.profilePic);
         profilePicUrl = uploadResponse.secure_url;
       } catch (uploadError) {
         console.error("Cloudinary upload error during onboarding:", uploadError);
@@ -235,20 +263,31 @@ export async function onboard(req, res) {
 export async function updateProfile(req, res) {
   try {
     const userId = req.user._id;
-    const { fullName, bio, nativeLanguage, learningLanguage, location, profilePic, userCode } = req.body;
+    const {
+      fullName,
+      bio,
+      nativeLanguage,
+      learningLanguage,
+      location,
+      profilePic,
+      userCode,
+      removeProfilePic,
+    } = req.body;
 
     let profilePicUrl = profilePic;
 
-    if (profilePic?.startsWith("data:")) {
+    if (removeProfilePic === true) {
+      profilePicUrl = "";
+    } else if (profilePic?.startsWith("data:")) {
       try {
-        const uploadResponse = await cloudinary.uploader.upload(profilePic, {
-          folder: "profile_pics",
-        });
+        const uploadResponse = await uploadProfilePicWithRetry(profilePic);
         profilePicUrl = uploadResponse.secure_url;
       } catch (uploadError) {
         console.error("Cloudinary upload error during profile update:", uploadError);
-        // Never persist raw base64 in MongoDB — fall back to current stored value.
-        profilePicUrl = undefined;
+        if (isCloudinaryTimeoutError(uploadError)) {
+          return res.status(504).json({ message: "Profile photo upload timed out. Please retry with a smaller image." });
+        }
+        return res.status(502).json({ message: "Profile photo upload failed. Please try again." });
       }
     }
 
@@ -274,7 +313,9 @@ export async function updateProfile(req, res) {
     if (nativeLanguage !== undefined) updateFields.nativeLanguage = nativeLanguage;
     if (learningLanguage !== undefined) updateFields.learningLanguage = learningLanguage;
     if (location !== undefined) updateFields.location = location;
-    if (profilePicUrl !== undefined && profilePicUrl !== "") {
+    if (removeProfilePic === true) {
+      updateFields.profilePic = "";
+    } else if (profilePicUrl !== undefined && profilePicUrl !== "") {
       updateFields.profilePic = profilePicUrl;
     }
     if (normalizedUserCode !== undefined) {

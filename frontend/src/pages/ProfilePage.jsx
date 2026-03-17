@@ -12,6 +12,47 @@ import { Link } from "react-router";
 import { LANGUAGES } from "../constants";
 import Avatar from "../components/Avatar";
 
+const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
+const COMPRESS_THRESHOLD_BYTES = 1.5 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 1400;
+
+const loadImageFromDataUrl = (dataUrl) => new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not process selected image"));
+    image.src = dataUrl;
+});
+
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => resolve(ev.target.result);
+    reader.onerror = () => reject(new Error("Could not read selected image"));
+    reader.readAsDataURL(file);
+});
+
+const compressProfileImage = async (dataUrl) => {
+    const image = await loadImageFromDataUrl(dataUrl);
+    const ratio = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(image.width, image.height));
+    const targetWidth = Math.max(1, Math.round(image.width * ratio));
+    const targetHeight = Math.max(1, Math.round(image.height * ratio));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUrl;
+
+    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    let quality = 0.86;
+    let compressed = canvas.toDataURL("image/jpeg", quality);
+    while (compressed.length > 2_000_000 && quality > 0.56) {
+        quality -= 0.1;
+        compressed = canvas.toDataURL("image/jpeg", quality);
+    }
+    return compressed;
+};
+
 
 const ProfilePage = () => {
 
@@ -27,6 +68,7 @@ const ProfilePage = () => {
         learningLanguage: "",
         location: "",
         profilePic: "",
+        removeProfilePic: false,
     });
     const [isGeneratingUserId, setIsGeneratingUserId] = useState(false);
 
@@ -41,19 +83,28 @@ const ProfilePage = () => {
             learningLanguage: authUser.learningLanguage || "",
             location: authUser.location || "",
             profilePic: "",   // intentionally empty; show initials by default
+            removeProfilePic: false,
         });
     }, [authUser]);
 
     const set = (key, val) => setForm((p) => ({ ...p, [key]: val }));
 
-    const handleImageUpload = (e) => {
+    const handleImageUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
         if (!file.type.startsWith("image/")) { toast.error("Please upload an image file"); return; }
-        if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB"); return; }
-        const reader = new FileReader();
-        reader.onload = (ev) => { set("profilePic", ev.target.result); };
-        reader.readAsDataURL(file);
+        if (file.size > MAX_PROFILE_IMAGE_BYTES) { toast.error("Image must be under 5 MB"); return; }
+
+        try {
+            let imageDataUrl = await fileToDataUrl(file);
+            if (file.size > COMPRESS_THRESHOLD_BYTES) {
+                imageDataUrl = await compressProfileImage(imageDataUrl);
+                toast.success("Image optimized for faster upload");
+            }
+            setForm((prev) => ({ ...prev, profilePic: imageDataUrl, removeProfilePic: false }));
+        } catch (error) {
+            toast.error(error?.message || "Could not process selected image");
+        }
     };
 
     const { mutate: save, isPending } = useMutation({
@@ -64,6 +115,7 @@ const ProfilePage = () => {
             queryClient.setQueryData(["authUser"], (old) =>
                 old ? { ...old, user: data.user } : old
             );
+            setForm((prev) => ({ ...prev, profilePic: "", removeProfilePic: false }));
         },
         onError: (err) => toast.error(err.response?.data?.message || "Failed to save profile"),
     });
@@ -75,10 +127,8 @@ const ProfilePage = () => {
         if (!/^[A-Z0-9]{6}$/.test(normalizedCode)) {
             return toast.error("User ID must be exactly 6 letters or digits");
         }
-        // Only include profilePic when the user explicitly chose a new image.
-        // Sending "" would overwrite the existing Cloudinary URL in the DB.
         const payload = { ...form, userCode: normalizedCode };
-        if (!payload.profilePic) delete payload.profilePic;
+        if (!payload.profilePic && !payload.removeProfilePic) delete payload.profilePic;
         save(payload);
     };
 
@@ -224,10 +274,10 @@ const ProfilePage = () => {
                                 >
                                     <CameraIcon className="size-4" /> Upload Photo
                                 </button>
-                                {form.profilePic && (
+                                {(form.profilePic || authUser?.profilePic) && (
                                     <button
                                         type="button"
-                                        onClick={() => set("profilePic", "")}
+                                        onClick={() => setForm((prev) => ({ ...prev, profilePic: "", removeProfilePic: true }))}
                                         className="btn btn-ghost btn-sm text-error block"
                                     >
                                         Remove photo
