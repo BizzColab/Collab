@@ -6,6 +6,36 @@ const ALLOWED_IMAGE_PROXY_HOSTS = new Set([
 ]);
 
 const IMAGE_PROXY_TIMEOUT_MS = 10000;
+const CLOUDINARY_UPLOAD_TIMEOUT_MS = 60000;
+const CLOUDINARY_UPLOAD_MAX_RETRIES = 1;
+
+function isCloudinaryTimeoutError(error) {
+    const cloudError = error?.error || {};
+    const httpCode = Number(cloudError.http_code || error?.http_code || 0);
+    const name = String(cloudError.name || error?.name || "").toLowerCase();
+    const message = String(cloudError.message || error?.message || "").toLowerCase();
+    return httpCode === 499 || name.includes("timeout") || message.includes("timeout");
+}
+
+async function uploadToCloudinaryWithRetry(fileBase64, organizationId) {
+    let lastError;
+    for (let attempt = 0; attempt <= CLOUDINARY_UPLOAD_MAX_RETRIES; attempt += 1) {
+        try {
+            return await cloudinary.uploader.upload(fileBase64, {
+                folder: `collab_org_${organizationId}`,
+                resource_type: "auto",
+                timeout: CLOUDINARY_UPLOAD_TIMEOUT_MS,
+            });
+        } catch (error) {
+            lastError = error;
+            if (!isCloudinaryTimeoutError(error) || attempt === CLOUDINARY_UPLOAD_MAX_RETRIES) {
+                break;
+            }
+            console.warn(`Cloudinary file upload timed out. Retrying (${attempt + 1}/${CLOUDINARY_UPLOAD_MAX_RETRIES})...`);
+        }
+    }
+    throw lastError;
+}
 
 function getProxiedImageUrl(rawUrl) {
     if (!rawUrl || typeof rawUrl !== "string") return null;
@@ -91,11 +121,7 @@ export const uploadFile = async (req, res) => {
             return res.status(400).json({ message: "File data is required" });
         }
 
-        // Upload to Cloudinary
-        const uploadResponse = await cloudinary.uploader.upload(fileBase64, {
-            folder: `collab_org_${organizationId}`,
-            resource_type: "auto",
-        });
+        const uploadResponse = await uploadToCloudinaryWithRetry(fileBase64, organizationId);
 
         const newFile = new File({
             name,
@@ -112,6 +138,9 @@ export const uploadFile = async (req, res) => {
         res.status(201).json(newFile);
     } catch (error) {
         console.error("Error in uploadFile controller:", error);
+        if (isCloudinaryTimeoutError(error)) {
+            return res.status(504).json({ message: "File upload timed out. Please retry with a smaller file." });
+        }
         res.status(500).json({ message: "Internal Server Error" });
     }
 };

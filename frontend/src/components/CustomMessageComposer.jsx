@@ -8,6 +8,32 @@ import {
   FileIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { uploadFile as uploadWorkspaceFile } from "../lib/api";
+
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const MAX_BACKEND_FALLBACK_SIZE = 7 * 1024 * 1024;
+
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = (e) => resolve(e.target.result);
+  reader.onerror = () => reject(new Error("Failed to read file"));
+  reader.readAsDataURL(file);
+});
+
+const inferFileCategory = (mimeType = "") => {
+  if (mimeType.startsWith("image/")) return "image";
+  if (
+    mimeType.includes("pdf") ||
+    mimeType.includes("document") ||
+    mimeType.includes("sheet") ||
+    mimeType.includes("text") ||
+    mimeType.includes("msword") ||
+    mimeType.includes("officedocument")
+  ) {
+    return "document";
+  }
+  return "other";
+};
 
 const CustomMessageComposer = ({ channel, isChannel, channelOrUserId }) => {
   const [message, setMessage] = useState("");
@@ -17,10 +43,29 @@ const CustomMessageComposer = ({ channel, isChannel, channelOrUserId }) => {
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
 
+  const uploadAttachment = async (att) => {
+    try {
+      const upload = await channel.sendFile(att.file);
+      return upload?.file;
+    } catch (streamError) {
+      console.warn("Stream attachment upload failed, falling back to backend upload", streamError);
+      if (att.size > MAX_BACKEND_FALLBACK_SIZE) {
+        throw new Error(`${att.name} is too large for fallback upload. Please use a file under 7 MB.`);
+      }
+      const fileBase64 = await fileToDataUrl(att.file);
+      const uploaded = await uploadWorkspaceFile({
+        name: att.name,
+        type: inferFileCategory(att.type),
+        fileBase64,
+        channel: channel?.id || channelOrUserId || "",
+      });
+      return uploaded?.url;
+    }
+  };
+
   const handleFileSelect = (files) => {
     const validFiles = Array.from(files).filter(file => {
-      const maxSize = 10 * 1024 * 1024; // 10MB
-      if (file.size > maxSize) {
+      if (file.size > MAX_ATTACHMENT_SIZE) {
         toast.error(`${file.name} is too large (max 10MB)`);
         return false;
       }
@@ -79,10 +124,11 @@ const CustomMessageComposer = ({ channel, isChannel, channelOrUserId }) => {
       if (attachments.length > 0) {
         messageData.attachments = await Promise.all(
           attachments.map(async (att) => {
-            const upload = await channel.sendFile(att.file);
+            const assetUrl = await uploadAttachment(att);
+            if (!assetUrl) throw new Error("Attachment upload failed");
             return {
               type: att.type.startsWith('image/') ? 'image' : 'file',
-              asset_url: upload.file,
+              asset_url: assetUrl,
               title: att.name,
               file_size: att.size,
               mime_type: att.type,
@@ -103,7 +149,7 @@ const CustomMessageComposer = ({ channel, isChannel, channelOrUserId }) => {
       });
     } catch (error) {
       console.error("Error sending message:", error);
-      toast.error("Failed to send message");
+      toast.error(error?.response?.data?.message || error?.message || "Failed to send message");
     } finally {
       setSending(false);
     }

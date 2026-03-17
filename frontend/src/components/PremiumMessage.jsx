@@ -14,7 +14,50 @@ import {
     CornerUpRight,
     Check,
     CheckCheck,
+    Paperclip,
+    Download,
+    Image as ImageIcon,
 } from "lucide-react";
+
+const getAttachmentUrl = (attachment = {}) => {
+    const rawUrl = (
+        attachment.asset_url ||
+        attachment.image_url ||
+        attachment.thumb_url ||
+        attachment.title_link ||
+        attachment.file ||
+        attachment.url ||
+        ""
+    );
+
+    if (!rawUrl || typeof rawUrl !== "string") return "";
+    if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) return rawUrl;
+    if (rawUrl.startsWith("//")) return `https:${rawUrl}`;
+    if (rawUrl.startsWith("/")) return `${window.location.origin}${rawUrl}`;
+    return rawUrl;
+};
+
+const getAttachmentDownloadUrl = (attachment = {}) => {
+    const url = getAttachmentUrl(attachment);
+    if (!url) return "";
+
+    // Cloudinary raw files are more reliable with forced attachment delivery.
+    if (url.includes("res.cloudinary.com") && !isImageAttachment(attachment) && url.includes("/upload/")) {
+        return url.replace("/upload/", "/upload/fl_attachment/");
+    }
+    return url;
+};
+
+const isImageAttachment = (attachment = {}) => {
+    const mimeType = (attachment.mime_type || "").toLowerCase();
+    const type = (attachment.type || "").toLowerCase();
+    const url = getAttachmentUrl(attachment).toLowerCase();
+    return (
+        mimeType.startsWith("image/") ||
+        type === "image" ||
+        /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/.test(url)
+    );
+};
 
 /**
  * PremiumMessage — A state-of-the-art message renderer with glassmorphism and depth.
@@ -83,6 +126,9 @@ const PremiumMessage = () => {
 
     const hasReactions = message.latest_reactions?.length > 0;
     const hasThread = !!message.reply_count;
+    const attachments = Array.isArray(message.attachments)
+        ? message.attachments.filter((att) => getAttachmentUrl(att))
+        : [];
 
     return (
         <div
@@ -158,7 +204,70 @@ const PremiumMessage = () => {
                     {message.text}
                 </div>
 
-                {/* ── Attachments — handled by Stream default or custom below if needed ── */}
+                {attachments.length > 0 && (
+                    <div className="mt-3 grid gap-2 max-w-2xl">
+                        {attachments.map((att, index) => {
+                            const attachmentUrl = getAttachmentUrl(att);
+                            const downloadUrl = getAttachmentDownloadUrl(att);
+                            const title = att.title || att.name || "Attachment";
+                            const isImage = isImageAttachment(att);
+
+                            if (isImage) {
+                                return (
+                                    <a
+                                        key={`${attachmentUrl}-${index}`}
+                                        href={attachmentUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="group block overflow-hidden rounded-2xl border border-base-300 bg-base-100 shadow-sm hover:shadow-md transition"
+                                    >
+                                        <img
+                                            src={attachmentUrl}
+                                            alt={title}
+                                            className="max-h-80 w-full object-cover"
+                                            loading="lazy"
+                                        />
+                                        <div className="flex items-center gap-2 px-3 py-2 text-sm text-base-content/70 group-hover:text-primary transition-colors">
+                                            <ImageIcon size={14} />
+                                            <span className="truncate">{title}</span>
+                                        </div>
+                                    </a>
+                                );
+                            }
+
+                            return (
+                                <a
+                                    key={`${attachmentUrl}-${index}`}
+                                    href={attachmentUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="flex items-center gap-3 rounded-2xl border border-base-300 bg-base-100 px-3 py-2 shadow-sm hover:border-primary/40 hover:bg-primary/5 transition"
+                                >
+                                    <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                                        <Paperclip size={16} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-semibold truncate text-base-content">{title}</p>
+                                        <p className="text-xs text-base-content/50 truncate">{att.mime_type || "File"}</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="btn btn-ghost btn-xs"
+                                        title="Download attachment"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            const urlToOpen = downloadUrl || attachmentUrl;
+                                            if (urlToOpen) window.open(urlToOpen, "_blank", "noopener,noreferrer");
+                                        }}
+                                    >
+                                        <Download size={14} />
+                                    </button>
+                                </a>
+                            );
+                        })}
+                    </div>
+                )}
 
                 {/* ── Reactions ── */}
                 {hasReactions && (
