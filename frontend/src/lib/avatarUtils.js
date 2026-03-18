@@ -1,3 +1,5 @@
+import { buildApiUrl } from "./runtimeConfig";
+
 // Google / Teams-style palette: soft background + matching accent text.
 const COLORS = [
     { bg: "#e8f0fe", text: "#1a73e8" }, // blue
@@ -12,18 +14,11 @@ const COLORS = [
     { bg: "#fce4ec", text: "#c2185b" }, // pink
 ];
 
-const BLOCKED_AVATAR_HOSTS = new Set([
-    "ui-avatars.com",
-    "www.ui-avatars.com",
-]);
-
 const CLOUDINARY_HOSTS = new Set([
     "res.cloudinary.com",
 ]);
 
-const IMAGE_PROXY_BASE = import.meta.env.MODE === "development"
-    ? "http://localhost:5000/api/files/image-proxy"
-    : "/api/files/image-proxy";
+const IMAGE_PROXY_BASE = buildApiUrl("/files/image-proxy");
 
 /**
  * Returns true when the value is a displayable photo URL or data URI.
@@ -32,9 +27,11 @@ const IMAGE_PROXY_BASE = import.meta.env.MODE === "development"
 export function isValidAvatarUrl(url) {
     if (!url || !url.trim()) return false;
     if (url.startsWith("data:")) return true; // base64 upload — always valid
+    if (url.startsWith("blob:")) return true; // local object URL preview
+    if (url.startsWith("/")) return true; // same-origin relative image URL
     try {
         const { protocol, hostname } = new URL(url);
-        if (BLOCKED_AVATAR_HOSTS.has(hostname)) return false;
+        // Accept any standard web URL; strict host allow-listing can hide valid avatars.
         return protocol === "http:" || protocol === "https:";
     } catch {
         return false;
@@ -42,7 +39,7 @@ export function isValidAvatarUrl(url) {
 }
 
 export function getDisplayImageUrl(url) {
-    if (!isValidAvatarUrl(url) || url.startsWith("data:")) return url;
+    if (!isValidAvatarUrl(url) || url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("/")) return url;
 
     try {
         const parsedUrl = new URL(url);

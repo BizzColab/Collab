@@ -1,5 +1,14 @@
 import Meeting from "../models/Meeting.js";
-import { scheduleMeetingEmail, cancelMeetingEmail } from "../lib/scheduler.js";
+
+const resolveFrontendBaseUrl = (req) => {
+    if (process.env.FRONTEND_URL) {
+        return process.env.FRONTEND_URL.replace(/\/$/, "");
+    }
+
+    const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+    const host = req.headers["x-forwarded-host"] || req.get("host");
+    return `${protocol}://${host}`;
+};
 
 export const getMeetings = async (req, res) => {
     try {
@@ -76,11 +85,8 @@ export const createMeeting = async (req, res) => {
         // Save first so we have the ID to construct the link and schedule it
         await newMeeting.save();
         
-        newMeeting.meetingLink = `${process.env.FRONTEND_URL}/call/${newMeeting._id}`;
+        newMeeting.meetingLink = `${resolveFrontendBaseUrl(req)}/call/${newMeeting._id}`;
         await newMeeting.save();
-
-        // Schedule the meeting email notification to trigger at kickoff
-        await scheduleMeetingEmail(newMeeting, req.user._id);
 
         res.status(201).json(newMeeting);
     } catch (error) {
@@ -103,9 +109,6 @@ export const deleteMeeting = async (req, res) => {
         }
 
         await Meeting.findByIdAndDelete(id);
-        
-        // Cancel scheduled email if one exists
-        cancelMeetingEmail(id);
 
         res.status(200).json({ message: "Meeting deleted" });
     } catch (error) {

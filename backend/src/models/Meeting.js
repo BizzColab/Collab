@@ -33,6 +33,9 @@ const meetingSchema = new mongoose.Schema(
         meetingLink: {
             type: String, // External link or internal stream call ID
         },
+        reminderSentAt: {
+            type: Date,
+        },
     },
     { timestamps: true }
 );
