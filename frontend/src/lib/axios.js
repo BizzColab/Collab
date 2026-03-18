@@ -1,11 +1,10 @@
 import axios from "axios";
 import { clearCachedAuthUser } from "./authCache";
 import { clearCachedDashboardSummary } from "./dashboardCache";
-
-const BASE_URL = import.meta.env.MODE === "development" ? "http://localhost:5000/api" : "/api";
+import { API_BASE_URL } from "./runtimeConfig";
 
 export const axiosInstance = axios.create({
-  baseURL: BASE_URL,
+  baseURL: API_BASE_URL,
   withCredentials: true, // send cookies with the request
 });
 

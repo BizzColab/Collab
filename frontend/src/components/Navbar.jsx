@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getFriendRequests } from "../lib/api";
 import { BellIcon, LogOutIcon, SearchIcon, SettingsIcon, UserIcon } from "lucide-react";
 import { buildNotificationKeys, getNotificationStateEventName, getSeenNotificationIds } from "../lib/notificationState";
+import { buildApiUrl } from "../lib/runtimeConfig";
 import ThemeSelector from "./ThemeSelector";
 import useLogout from "../hooks/useLogout";
 import Avatar from "./Avatar";
@@ -43,8 +44,7 @@ const Navbar = () => {
   useEffect(() => {
     if (!authUser) return undefined;
 
-    const baseUrl = import.meta.env.MODE === "development" ? "http://localhost:5000/api" : "/api";
-    const source = new EventSource(`${baseUrl}/users/stream`, { withCredentials: true });
+    const source = new EventSource(buildApiUrl("/users/stream"), { withCredentials: true });
 
     const refreshNotifications = () => {
       queryClient.invalidateQueries({ queryKey: ["friendRequests"] });

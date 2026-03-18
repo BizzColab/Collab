@@ -55,7 +55,7 @@ graph TB
 | | Mongoose | ODM |
 | | JWT | Authentication |
 | | Stream Chat | Chat API |
-| **Deployment** | Render | Cloud Hosting |
+| **Deployment** | Vercel | Frontend + API Hosting |
 | | MongoDB Atlas | Database Hosting |
 
 ## 📁 Project Structure
@@ -277,25 +277,49 @@ Collab implements a mobile-first responsive design approach:
 
 ## 🚀 Deployment
 
-### Render Deployment Configuration
+### Vercel Single-Project Deployment
 
-Collab is configured for deployment on Render with the following setup:
+Collab is configured to deploy as a single Vercel project:
 
-1. **Web Service** for the backend API
-2. **Static Site** for the frontend build
-3. **MongoDB Atlas** for database hosting
+1. Static frontend build from `frontend/dist`
+2. Serverless backend API routed through `/api/*`
+3. Vercel Cron for meeting reminder emails (`/api/internal/cron/meeting-reminders`)
+4. MongoDB Atlas for database hosting
+
+Project files used for Vercel deployment:
+
+1. `vercel.json` for rewrites, output directory, and cron schedule
+2. `api/index.js` as the serverless entrypoint that boots the Express app
+
+Build command used on Vercel:
+
+```bash
+npm run build
+```
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `PORT` | Server port (default: 5000) |
 | `MONGO_URI` | MongoDB connection string |
 | `JWT_SECRET` | Secret key for JWT signing |
+| `CRON_SECRET` | Secret used by Vercel Cron (`Authorization: Bearer <CRON_SECRET>`) |
+| `FRONTEND_URL` | Public app URL (recommended for absolute meeting links) |
+| `CLIENT_URL` | Optional explicit CORS allow-list origin |
 | `STREAM_API_KEY` | Stream Chat API key |
 | `STREAM_API_SECRET` | Stream Chat API secret |
-| `NODE_ENV` | Environment (development/production) |
+| `SMTP_HOST` | SMTP host for meeting emails (default: `smtp.gmail.com`) |
+| `SMTP_PORT` | SMTP port (default: `587`) |
+| `SMTP_USER` | SMTP username/email |
+| `SMTP_PASS` | SMTP password/app password |
+| `NODE_ENV` | Environment (`development`/`production`) |
 | `VITE_STREAM_API_KEY` | Stream API key for frontend |
+| `VITE_API_BASE_URL` | Optional frontend API base URL override |
+
+Notes:
+
+1. For a single Vercel project, `VITE_API_BASE_URL` can be omitted (defaults to `/api`).
+2. Set both production and preview environment variables in Vercel project settings.
 
 ## 🧪 Testing
 

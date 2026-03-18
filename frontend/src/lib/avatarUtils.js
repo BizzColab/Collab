@@ -1,3 +1,5 @@
+import { buildApiUrl } from "./runtimeConfig";
+
 // Google / Teams-style palette: soft background + matching accent text.
 const COLORS = [
     { bg: "#e8f0fe", text: "#1a73e8" }, // blue
@@ -21,9 +23,7 @@ const CLOUDINARY_HOSTS = new Set([
     "res.cloudinary.com",
 ]);
 
-const IMAGE_PROXY_BASE = import.meta.env.MODE === "development"
-    ? "http://localhost:5000/api/files/image-proxy"
-    : "/api/files/image-proxy";
+const IMAGE_PROXY_BASE = buildApiUrl("/files/image-proxy");
 
 /**
  * Returns true when the value is a displayable photo URL or data URI.
